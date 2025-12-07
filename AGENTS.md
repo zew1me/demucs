@@ -27,7 +27,8 @@ Top-level docs (`README.md`, `AGENTS.md`) describe how the pieces interact; avoi
 - Keep fixtures under 10 seconds of audio to keep CI quick if automated tests are added later.
 
 ## Commit & Pull Request Guidelines
-- Keep commits scoped to one directory whenever possible (e.g., “auto: add runpod client CLI”). If a change crosses boundaries, document each affected workflow in the commit body.
+- Use Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.). The `auto:` prefix is acceptable when paired with a valid type (e.g., `auto: chore: …`), but vanilla “auto:” only should be avoided going forward.
+- Keep commits scoped to one directory whenever possible. If a change crosses boundaries, document each affected workflow in the commit body.
 - Always sync the root `uv.lock` after changing dependencies so both the Demucs CLI and client stay reproducible.
 - PR descriptions should list: the Demucs command (local), Docker build tag (worker), or CLI invocation (client) you tested, plus the resulting output location or URL.
 - Continue using short auto-style commit subjects. Link issues when relevant and include screenshots/logs only if they add clarity (e.g., RunPod deployment screenshot, CLI output).
