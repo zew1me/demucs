@@ -156,6 +156,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.uv/
 
 # Spyder project settings
 .spyderproject
@@ -215,5 +216,5 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# repo demus output
-separations/
+# repo demucs output
+local-run/separations/

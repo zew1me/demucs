@@ -1,35 +1,86 @@
-# uv-demucs-runner
+# Demucs serverless toolkit
 
-This repository is intentionally tiny—it only contains a `pyproject.toml` that declares a dependency on the official [Demucs](https://github.com/facebookresearch/demucs) CLI. Using [uv](https://github.com/astral-sh/uv) you can run Demucs locally without creating a traditional virtual environment.
+This repository now acts as a monorepo for three complementary flows that all rely on the root-level `pyproject.toml`:
 
-## Prerequisites
+1. **`local-run/`** – documentation plus a scratch space for running the official Demucs CLI locally (outputs land here).
+2. **`runpod-worker/`** – the GPU-ready serverless worker that RunPod clones, builds, and deploys.
+3. **`client/`** – a thin command-line helper for hitting your RunPod endpoint and saving the returned stems.
 
-1. Install `uv` (see the official install docs). No other tooling is required.
-2. Place the source audio you want to separate somewhere reachable—e.g. `~/Downloads/export.wav`.
+## Repository layout
 
-## Usage
+| Path | Purpose |
+| --- | --- |
+| `local-run/` | Docs + separation outputs for local experimentation; uses the root `pyproject.toml`. |
+| `runpod-worker/` | Dockerfile, handler, and `runpod.yaml` describing the serverless worker. |
+| `client/` | Python CLI (`runpod-demucs`) that calls the deployed endpoint and writes WAVs. |
+| `AGENTS.md` | Contributor and agent workflow guide for this repo. |
 
-Demucs already exposes a `demucs` entrypoint, so after syncing the environment with `uv` you can run the CLI as usual.
+UV is configured (via `uv.toml`) to keep its cache in `.uv/cache`, ensuring everything lives inside the repo; the `.uv/` directory is ignored by git.
+
+## Local development (`local-run/`)
+
+The existing workflow moved intact under `local-run/`, but everything is powered by the repo-root `pyproject.toml`. Quick start:
 
 ```bash
-uv sync          # installs Demucs into .uv/
-TORCHAUDIO_USE_SOUND_FILE=1 uv run demucs --name htdemucs ~/Downloads/export.wav
+cd local-run
+uv sync
+TORCHAUDIO_USE_SOUND_FILE=1 uv run demucs --name htdemucs ~/Downloads/song.wav
 ```
 
-The `--name htdemucs` flag picks the 4-stem HT Demucs model. Replace `export.wav` with any other audio file path.
+Outputs land in `local-run/separations/<timestamp>/...`. The subdirectory README covers the details.
 
-### Run without syncing first
+## RunPod serverless worker (`runpod-worker/`)
 
-Use `uvx` when you simply want to execute Demucs once without managing a local environment:
+Key files:
+
+- `Dockerfile` – installs CUDA-enabled PyTorch 2.4.1/torchaudio 2.4.1, Demucs, ffmpeg, and the RunPod SDK.
+- `handler.py` – downloads the audio (URL or base64), runs `demucs --name <model> --shifts --overlap`, base64-encodes the stems, and returns them.
+- `runpod.yaml` – instructs RunPod to launch `handler.py` and call its `handler` function.
+
+Build/test locally:
 
 ```bash
-TORCHAUDIO_USE_SOUND_FILE=1 uvx demucs --name htdemucs ~/Downloads/export.wav
+cd runpod-worker
+docker build -t demucs-worker .
+docker run --rm demucs-worker  # RunPod will pass events, but this validates the image
 ```
 
-`uvx` downloads (and caches) Demucs on demand and executes the CLI directly.
+Deploy checklist:
 
-## Notes
+1. Push this repo to GitHub (public or private works).
+2. In the RunPod dashboard choose **Deploy Serverless Endpoint → Connect GitHub** and select the repo.
+3. Provide any required environment variables (none are mandatory today) and deploy.
+4. RunPod returns an endpoint ID such as `8cw1xzsn9rmbti`. Use it with `client/runpod_client.py` or plain curl.
 
-- No source code is included; this repo only exists so that `uv` can track the Demucs dependency in `pyproject.toml`.
-- Set `TORCHAUDIO_USE_SOUND_FILE=1` (as above) so torchaudio writes audio with the pure-Python SoundFile backend—no system FFmpeg/TorchCodec binaries required.
-- Feel free to edit `pyproject.toml` to pin a specific Demucs version or add additional CLI tools you rely on.
+The handler returns:
+
+```json
+{
+  "status": "success",
+  "model": "htdemucs_ft",
+  "stems": {
+    "vocals": {"filename": "vocals.wav", "base64": "..."},
+    "drums": {"filename": "drums.wav", "base64": "..."},
+    "bass": {"filename": "bass.wav", "base64": "..."},
+    "other": {"filename": "other.wav", "base64": "..."}
+  }
+}
+```
+
+## RunPod client (`client/`)
+
+The root `pyproject.toml` exposes a `runpod-demucs` script that wraps the serverless endpoint and writes stems locally.
+
+```bash
+uv sync
+RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
+  uv run runpod-demucs --input-url https://example.com/song.wav --save-dir stems
+```
+
+Flags let you provide a local `--input-file` (base64 uploads), override `--model-name`, and tweak `--shifts/--overlap`. `client/runpod_client.py` houses the implementation.
+
+## Next steps
+
+- Adjust `runpod-worker/handler.py` if you need to push stems to cloud storage instead of returning base64.
+- Extend the `client` package with polling for async runs or integrations with DAWs.
+- Keep `AGENTS.md` in sync with any new workflows so future contributors know which directory to touch.

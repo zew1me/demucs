@@ -1,19 +1,19 @@
 [project]
-name = "uv-demucs-runner"
+name = "demucs-toolkit"
 version = "0.1.0"
-description = "Minimal uv-managed setup to run the Demucs CLI"
+description = "Local Demucs runner plus RunPod client utilities"
 authors = [{ name = "Nigel Stuke" }]
 requires-python = ">=3.10"
 dependencies = [
     "demucs>=4.0.0",
+    "requests>=2.32",
+    "soundfile>=0.12.1",
     "torch==2.4.1",
     "torchaudio==2.4.1",
-    "soundfile>=0.12.1"
 ]
 
 [project.scripts]
-demucs = "demucs.__main__:main"
+runpod-demucs = "client.runpod_client:main"
 
 [tool.uv]
-# Always rely on uv to install the Demucs CLI on demand
 package = true
