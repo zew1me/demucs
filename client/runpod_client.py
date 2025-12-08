@@ -1,16 +1,19 @@
-import argparse
 import base64
-import os
 import pathlib
-import sys
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 import requests
+import typer
+from dynaconf import Dynaconf
 
 DEFAULT_MODEL = "htdemucs_ft"
 DEFAULT_SHIFTS = 4
 DEFAULT_OVERLAP = 0.25
 DEFAULT_API_BASE = "https://api.runpod.ai/v2"
+
+settings = Dynaconf(envvar_prefix="RUNPOD", environments=True, load_dotenv=True)
+
+app = typer.Typer(help="Invoke the RunPod Demucs endpoint and save returned stems locally.")
 
 
 def _encode_file(path: pathlib.Path) -> str:
@@ -30,84 +33,87 @@ def _write_stems(stems: Dict[str, Any], destination: pathlib.Path) -> None:
             continue
         output_path = destination / filename
         output_path.write_bytes(base64.b64decode(blob))
-        print(f"wrote {output_path}")
+        typer.echo(f"wrote {output_path}")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Invoke the RunPod Demucs endpoint and save returned stems.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument("--api-key", default=os.getenv("RUNPOD_API_KEY"), help="RunPod API token")
-    parser.add_argument("--endpoint-id", default=os.getenv("RUNPOD_ENDPOINT_ID"), help="RunPod endpoint ID")
-    parser.add_argument(
-        "--endpoint-url",
-        default=os.getenv("RUNPOD_ENDPOINT_URL"),
-        help="Optional full endpoint URL (skips --api-base/--endpoint-id)",
-    )
-    parser.add_argument("--api-base", default=DEFAULT_API_BASE, help="Base URL for RunPod API")
-    parser.add_argument("--input-url", help="Publicly reachable audio URL")
-    parser.add_argument("--input-file", help="Local file to base64 upload if no URL is provided")
-    parser.add_argument("--model-name", default=DEFAULT_MODEL)
-    parser.add_argument("--shifts", type=int, default=DEFAULT_SHIFTS)
-    parser.add_argument("--overlap", type=float, default=DEFAULT_OVERLAP)
-    parser.add_argument("--timeout", type=int, default=900, help="HTTP timeout in seconds")
-    parser.add_argument("--save-dir", default="runpod-stems", help="Destination directory for decoded WAVs")
+def _resolve_option(value: Optional[str], setting_key: str) -> Optional[str]:
+    if value:
+        return value
+    resolved = settings.get(setting_key)
+    if isinstance(resolved, str) and resolved.strip():
+        return resolved
+    return None
 
-    args = parser.parse_args(argv)
 
-    if not args.api_key:
-        parser.error("Set --api-key or RUNPOD_API_KEY")
-    if not (args.endpoint_url or args.endpoint_id):
-        parser.error("Provide --endpoint-url or --endpoint-id/RUNPOD_ENDPOINT_ID")
-    if not (args.input_url or args.input_file):
-        parser.error("Provide --input-url or --input-file")
+@app.command()
+def main(
+    api_key: Optional[str] = typer.Option(None, help="RunPod API token"),
+    endpoint_id: Optional[str] = typer.Option(None, help="RunPod endpoint ID"),
+    endpoint_url: Optional[str] = typer.Option(None, help="Override full RunPod endpoint URL"),
+    api_base: str = typer.Option(DEFAULT_API_BASE, help="Base URL for RunPod API"),
+    input_file: Optional[pathlib.Path] = typer.Option(None, help="Local file path to upload"),
+    model_name: str = typer.Option(DEFAULT_MODEL),
+    shifts: int = typer.Option(DEFAULT_SHIFTS),
+    overlap: float = typer.Option(DEFAULT_OVERLAP),
+    timeout: int = typer.Option(900, help="HTTP timeout in seconds"),
+    save_dir: pathlib.Path = typer.Option(pathlib.Path("runpod-stems"), help="Destination directory"),
+) -> None:
+    """Call the RunPod Demucs worker via sync API and store returned stems."""
+
+    resolved_api_key = _resolve_option(api_key, "API_KEY")
+    if not resolved_api_key:
+        raise typer.BadParameter("Set --api-key or configure RUNPOD_API_KEY", param_name="api_key")
+
+    resolved_endpoint_url = _resolve_option(endpoint_url, "ENDPOINT_URL")
+    resolved_endpoint_id = _resolve_option(endpoint_id, "ENDPOINT_ID")
+    if not (resolved_endpoint_url or resolved_endpoint_id):
+        raise typer.BadParameter(
+            "Provide --endpoint-url or configure --endpoint-id/RUNPOD_ENDPOINT_ID", param_name="endpoint_id"
+        )
+
+    if not input_file:
+        raise typer.BadParameter("Provide --input-file", param_name="input_file")
+
+    input_path = input_file.expanduser().resolve()
+    if not input_path.exists():
+        raise typer.BadParameter(f"Input file not found: {input_path}", param_name="input_file")
 
     payload: Dict[str, Any] = {
-        "model_name": args.model_name,
-        "shifts": args.shifts,
-        "overlap": args.overlap,
-    }
-    if args.input_url:
-        payload["audio_url"] = args.input_url
-    else:
-        input_path = pathlib.Path(args.input_file).expanduser().resolve()
-        if not input_path.exists():
-            parser.error(f"Input file not found: {input_path}")
-        payload["audio_base64"] = _encode_file(input_path)
-
-    endpoint_url = args.endpoint_url
-    if not endpoint_url:
-        endpoint_url = f"{args.api_base.rstrip('/')}/{args.endpoint_id}/runsync"
-
-    headers = {
-        "Authorization": f"Bearer {args.api_key}",
-        "Content-Type": "application/json",
+        "model_name": model_name,
+        "shifts": shifts,
+        "overlap": overlap,
+        "audio_base64": _encode_file(input_path),
     }
 
-    response = requests.post(endpoint_url, json={"input": payload}, headers=headers, timeout=args.timeout)
-    response.raise_for_status()
+    target_url = resolved_endpoint_url or f"{api_base.rstrip('/')}/{resolved_endpoint_id}/runsync"
+    headers = {"Authorization": f"Bearer {resolved_api_key}", "Content-Type": "application/json"}
+
+    try:
+        response = requests.post(target_url, json={"input": payload}, headers=headers, timeout=timeout)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        typer.secho(f"RunPod request failed: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
     body = response.json()
-
     output = body.get("output") or body
     status = body.get("status") or output.get("status")
     if status and status not in ("COMPLETED", "success", "SUCCESS"):
-        print(f"RunPod returned status {status}: {output}", file=sys.stderr)
-        return 1
+        typer.secho(f"RunPod returned status {status}: {output}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
     if output.get("status") == "error":
-        print(f"Worker error: {output.get('error')}", file=sys.stderr)
-        return 1
+        typer.secho(f"Worker error: {output.get('error')}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
     stems = output.get("stems")
     if not stems:
-        print("No stems returned", file=sys.stderr)
-        return 1
+        typer.secho("No stems returned", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1)
 
-    destination = pathlib.Path(args.save_dir).expanduser().resolve()
+    destination = save_dir.expanduser().resolve()
     _write_stems(stems, destination)
-    print(f"Decoded {len(stems)} stems to {destination}")
-    return 0
+    typer.secho(f"Decoded {len(stems)} stems to {destination}", fg=typer.colors.GREEN)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    app()
