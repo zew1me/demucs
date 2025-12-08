@@ -6,6 +6,7 @@ The repo now houses three distinct workflows that all rely on the root-level `py
 - `runpod-worker/` – Docker context for the GPU worker (`Dockerfile`, `handler.py`, `runpod.yaml`, `requirements.txt`). Nothing else should bleed into this folder.
 - `client/` – Python module (`client/__init__.py`, `runpod_client.py`) that exposes the `runpod-demucs` CLI via the root project scripts table.
 Top-level docs (`README.md`, `AGENTS.md`) describe how the pieces interact; avoid adding executable code directly in the repo root outside of the shared `pyproject`. UV’s cache is redirected to `.uv/cache` via `uv.toml`, and the entire `.uv/` directory stays untracked.
+Use the `uv` CLI (`uv add`, `uv remove`, `uv lock`, etc.) to modify dependencies and lockfiles whenever possible rather than editing `pyproject.toml` or `uv.toml` by hand.
 
 ## Build, Test, and Development Commands
 - `uv sync`: run once from anywhere in the repo to hydrate both the Demucs CLI and the RunPod client scripts into `.uv/`.
