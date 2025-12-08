@@ -10,10 +10,12 @@ dependencies = [
     "soundfile>=0.12.1",
     "torch==2.4.1",
     "torchaudio==2.4.1",
+    "typer>=0.12.3",
+    "dynaconf>=3.2",
 ]
 
 [project.scripts]
-runpod-demucs = "client.runpod_client:main"
+runpod-demucs = "client.runpod_client:app"
 
 [tool.uv]
 package = true
