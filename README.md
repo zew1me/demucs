@@ -93,22 +93,12 @@ The root `pyproject.toml` exposes a `runpod-demucs` script that wraps the server
 ```bash
 uv sync
 RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
-  uv run runpod-demucs --input-url https://example.com/song.wav --save-dir stems
+  uv run runpod-demucs --input-file ~/Downloads/song.wav --save-dir stems
 ```
 
-To push a local WAV, point the CLI at a file path—the helper base64 encodes it for you. You can
-either set `RUNPOD_API_KEY`/`RUNPOD_ENDPOINT_ID` or supply the matching flags explicitly:
-
-```bash
-uv run runpod-demucs \
-  --api-key "$RUNPOD_API_KEY" \
-  --endpoint-id "$RUNPOD_ENDPOINT_ID" \
-  --input-file ~/Downloads/song.wav \
-  --save-dir stems
-```
-
-Flags also let you override `--model-name` and tweak `--shifts/--overlap`. `client/runpod_client.py`
-houses the implementation.
+You can either set `RUNPOD_API_KEY`/`RUNPOD_ENDPOINT_ID` (or a `.env` file read by Dynaconf), or
+pass the matching flags explicitly. Flags also let you override `--model-name` and tweak
+`--shifts/--overlap`. `client/runpod_client.py` houses the implementation.
 
 Configuration is powered by [Dynaconf](https://www.dynaconf.com/), so the CLI will read
 `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, and `RUNPOD_ENDPOINT_URL` from your environment or `.env`

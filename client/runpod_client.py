@@ -51,7 +51,6 @@ def main(
     endpoint_id: Optional[str] = typer.Option(None, help="RunPod endpoint ID"),
     endpoint_url: Optional[str] = typer.Option(None, help="Override full RunPod endpoint URL"),
     api_base: str = typer.Option(DEFAULT_API_BASE, help="Base URL for RunPod API"),
-    input_url: Optional[str] = typer.Option(None, help="Publicly reachable audio URL"),
     input_file: Optional[pathlib.Path] = typer.Option(None, help="Local file path to upload"),
     model_name: str = typer.Option(DEFAULT_MODEL),
     shifts: int = typer.Option(DEFAULT_SHIFTS),
@@ -72,19 +71,19 @@ def main(
             "Provide --endpoint-url or configure --endpoint-id/RUNPOD_ENDPOINT_ID", param_name="endpoint_id"
         )
 
-    if not (input_url or input_file):
-        raise typer.BadParameter("Provide --input-url or --input-file", param_name="input_url")
-    if input_url and input_file:
-        raise typer.BadParameter("Choose either --input-url or --input-file", param_name="input_url")
+    if not input_file:
+        raise typer.BadParameter("Provide --input-file", param_name="input_file")
 
-    payload: Dict[str, Any] = {"model_name": model_name, "shifts": shifts, "overlap": overlap}
-    if input_url:
-        payload["audio_url"] = input_url
-    else:
-        input_path = input_file.expanduser().resolve()  # type: ignore[union-attr]
-        if not input_path.exists():
-            raise typer.BadParameter(f"Input file not found: {input_path}", param_name="input_file")
-        payload["audio_base64"] = _encode_file(input_path)
+    input_path = input_file.expanduser().resolve()
+    if not input_path.exists():
+        raise typer.BadParameter(f"Input file not found: {input_path}", param_name="input_file")
+
+    payload: Dict[str, Any] = {
+        "model_name": model_name,
+        "shifts": shifts,
+        "overlap": overlap,
+        "audio_base64": _encode_file(input_path),
+    }
 
     target_url = resolved_endpoint_url or f"{api_base.rstrip('/')}/{resolved_endpoint_id}/runsync"
     headers = {"Authorization": f"Bearer {resolved_api_key}", "Content-Type": "application/json"}
