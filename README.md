@@ -67,6 +67,25 @@ The handler returns:
 }
 ```
 
+### Testing the worker with curl
+
+RunPod's sync endpoint always expects a JSON body, so even when you have a local WAV you must
+base64-encode it and send it as `audio_base64`. One sample workflow:
+
+```bash
+AUDIO_B64=$(base64 -i ~/Downloads/song.wav | tr -d '\n')
+PAYLOAD=$(jq -n --arg audio "$AUDIO_B64" '{input:{audio_base64:$audio,model_name:"htdemucs_ft"}}')
+curl -X POST \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data "$PAYLOAD" \
+  "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/runsync"
+```
+
+You can reuse the same payload for local smoke tests by placing it into
+`runpod-worker/test_input.json` before running `docker run --rm -e RUNPOD_TEST=1 demucs-worker`.
+If you prefer URLs, swap in `audio_url` instead of uploading the blob.
+
 ## RunPod client (`client/`)
 
 The root `pyproject.toml` exposes a `runpod-demucs` script that wraps the serverless endpoint and writes stems locally.
@@ -77,7 +96,19 @@ RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
   uv run runpod-demucs --input-url https://example.com/song.wav --save-dir stems
 ```
 
-Flags let you provide a local `--input-file` (base64 uploads), override `--model-name`, and tweak `--shifts/--overlap`. `client/runpod_client.py` houses the implementation.
+To push a local WAV, point the CLI at a file path—the helper base64 encodes it for you. You can
+either set `RUNPOD_API_KEY`/`RUNPOD_ENDPOINT_ID` or supply the matching flags explicitly:
+
+```bash
+uv run runpod-demucs \
+  --api-key "$RUNPOD_API_KEY" \
+  --endpoint-id "$RUNPOD_ENDPOINT_ID" \
+  --input-file ~/Downloads/song.wav \
+  --save-dir stems
+```
+
+Flags also let you override `--model-name` and tweak `--shifts/--overlap`. `client/runpod_client.py`
+houses the implementation.
 
 ## Next steps
 
