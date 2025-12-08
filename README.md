@@ -110,6 +110,11 @@ uv run runpod-demucs \
 Flags also let you override `--model-name` and tweak `--shifts/--overlap`. `client/runpod_client.py`
 houses the implementation.
 
+Configuration is powered by [Dynaconf](https://www.dynaconf.com/), so the CLI will read
+`RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, and `RUNPOD_ENDPOINT_URL` from your environment or `.env`
+files automatically. The Typer-powered interface mirrors those knobs as flags if you prefer to pass
+them explicitly.
+
 ## Next steps
 
 - Adjust `runpod-worker/handler.py` if you need to push stems to cloud storage instead of returning base64.
