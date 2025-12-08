@@ -19,3 +19,9 @@ runpod-demucs = "client.runpod_client:app"
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.0",
+    "pyrefly>=0.44.2",
+]

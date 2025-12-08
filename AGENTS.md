@@ -14,6 +14,7 @@ Use the `uv` CLI (`uv add`, `uv remove`, `uv lock`, etc.) to modify dependencies
 - `cd runpod-worker && docker build -t demucs-worker .`: ensure Docker contexts build cleanly; RunPod performs the same operation server-side.
 - `docker run --rm -e RUNPOD_TEST=1 demucs-worker`: lightweight smoke test that the handler imports (the actual event loop only triggers inside RunPod, but this surfaces import/runtime errors early).
 - `uv sync && RUNPOD_API_KEY=... RUNPOD_ENDPOINT_ID=... uv run runpod-demucs --input-file ~/Downloads/song.wav`: confirms the CLI can talk to a deployed endpoint and decode stems locally.
+- `uv run pre-commit run --all-files`: mirrors the CI lint/type-check step (trailing whitespace, EOF fixes, Ruff, Pyrefly). Required before opening a PR; GitHub gate named **pre-commit** must pass before merging to `master`.
 
 ## Coding Style & Naming Conventions
 - Prefer 4-space indentation and black-compatible formatting for Python (both the worker and client). Keep modules snake_case and functions/methods snake_case; classes stay PascalCase.
