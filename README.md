@@ -88,10 +88,16 @@ If you prefer URLs, swap in `audio_url` instead of uploading the blob.
 
 ## RunPod client (`client/`)
 
-The root `pyproject.toml` exposes a `runpod-demucs` script that wraps the serverless endpoint and writes stems locally.
+The root `pyproject.toml` exposes a `runpod-demucs` script that wraps the serverless endpoint and writes stems locally. Usage is consumption-first:
 
 ```bash
 uv sync
+uv run runpod-demucs \
+  --input-file "~/Downloads/Screen Recording 2025-11-05 at 10.20.42 PM.wav" \
+  --save-dir stems
+```
+
+Dynaconf loads `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, and `RUNPOD_ENDPOINT_URL` from your environment or `.env` files, so you can avoid repeating secrets. See the [Dynaconf env var docs](https://www.dynaconf.com/envvars/) for supported sources. If you prefer to pass credentials explicitly, add `--api-key` and `--endpoint-id` flags. Additional knobs like `--model-name`, `--shifts`, and `--overlap` remain available; `client/runpod_client.py` houses the implementation.
 RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
   uv run runpod-demucs --input-file ~/Downloads/song.wav --save-dir stems
 ```
