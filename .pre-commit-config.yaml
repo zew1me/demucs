@@ -12,7 +12,7 @@ repos:
     hooks:
       - id: pyrefly
         name: pyrefly
-        entry: uv run pyrefly check
+        entry: ./.venv/bin/python -m pyrefly check
         language: system
         pass_filenames: false
         types_or:
