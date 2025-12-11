@@ -18,9 +18,12 @@ Use the `uv` CLI (`uv add`, `uv remove`, `uv lock`, etc.) to modify dependencies
 
 ### Pre-commit workflow expectations
 
-- Hooks live at the repo root in `.pre-commit-config.yaml` and run Ruff plus Pyrefly (type checking the entire repo). GitHub Actions runs `uv run pre-commit run --all-files` on every push/PR.
-- When authoring code, install hooks once via `uv run pre-commit install` so `git commit` enforces them locally; use `uv run pre-commit run --all-files` prior to opening a PR to catch failures earlier.
+- Hooks live at the repo root in `.pre-commit-config.yaml` and run Ruff plus Pyrefly (type checking the entire repo). GitHub Actions runs `uv run pre-commit run --all-files` on every push/PR and is required for merges.
+- When authoring code, install hooks once via `uv run pre-commit install` so `git commit` enforces them locally; use `uv run pre-commit run --all-files` prior to opening a PR to catch failures earlier. For quick spot-checks, `uv run pre-commit run --files path/to/file.py` targets only the files you just edited.
 - If Pyrefly blocks your commit, address the typing issue (do not skip the hook). When editing worker-only files that import `runpod`, guard imports as in `runpod-worker/handler.py` so Pyrefly can type-check without that dependency installed locally.
+- Workflow-specific notes:
+  - `client/`: expect Pyrefly to enforce Typer/Click signatures—prefer raising `typer.BadParameter` with `param_hint` instead of unsupported `param_name`.
+  - `runpod-worker/`: the hook runs without GPU deps; keep imports optional and prefer pure-stdlib logic in the handler core to keep linting green.
 
 ## Coding Style & Naming Conventions
 - Prefer 4-space indentation and black-compatible formatting for Python (both the worker and client). Keep modules snake_case and functions/methods snake_case; classes stay PascalCase.
