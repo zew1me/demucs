@@ -17,6 +17,17 @@ This repository now acts as a monorepo for three complementary flows that all re
 
 UV is configured (via `uv.toml`) to keep its cache in `.uv/cache`, ensuring everything lives inside the repo; the `.uv/` directory is ignored by git.
 
+## Pre-commit + linting
+
+We gate merges with a `pre-commit` job that runs the standard formatting hooks plus `ruff` and `pyrefly` type checking. Run these locally before pushing:
+
+```bash
+uv run pre-commit install      # one-time git hook install
+uv run pre-commit run --all-files
+```
+
+CI mirrors the same command in `.github/workflows/pre-commit.yml`. Mark the resulting **pre-commit** GitHub check as required in branch protections so pull requests must pass before merging into `master`/`main`.
+
 ## Local development (`local-run/`)
 
 The existing workflow moved intact under `local-run/`, but everything is powered by the repo-root `pyproject.toml`. Quick start:
