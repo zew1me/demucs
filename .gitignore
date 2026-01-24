@@ -218,6 +218,7 @@ __marimo__/
 
 # repo demucs output
 local-run/separations/
+local-run/separated/
 
 # default output folder for client calls to runpod
 client/stems
