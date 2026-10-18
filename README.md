@@ -95,7 +95,7 @@ curl -X POST \
 
 You can reuse the same payload for local smoke tests by placing it into
 `runpod-worker/test_input.json` before running `docker run --rm -e RUNPOD_TEST=1 demucs-worker`.
-If you prefer URLs, swap in `audio_url` instead of uploading the blob.
+If you prefer to avoid base64 payloads, use the Cloudflare R2 transfer mode below.
 
 ## RunPod client (`client/`)
 
@@ -122,8 +122,28 @@ Configuration is powered by [Dynaconf](https://www.dynaconf.com/), so the CLI wi
 files automatically. The Typer-powered interface mirrors those knobs as flags if you prefer to pass
 them explicitly.
 
+### Cloudflare R2 transfer mode
+
+If you'd rather avoid base64 payloads, the CLI can upload inputs to Cloudflare R2, pass the R2
+credentials to the worker, and then download stems back locally. Provide the R2 credentials as
+flags or environment variables with the `RUNPOD_` prefix (for example `RUNPOD_R2_ENDPOINT`).
+
+```bash
+RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
+RUNPOD_R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+RUNPOD_R2_BUCKET=demucs-stems \
+RUNPOD_R2_ACCESS_KEY_ID=... \
+RUNPOD_R2_SECRET_ACCESS_KEY=... \
+  uv run runpod-demucs --input-file ~/Downloads/song.wav --save-dir stems \
+  --r2-download --r2-cleanup
+```
+
+The worker responds with `r2_output` metadata (bucket + prefix). The client uses the same
+credentials to download the stems and can optionally delete the input/output keys when
+`--r2-cleanup` is set.
+
 ## Next steps
 
-- Adjust `runpod-worker/handler.py` if you need to push stems to cloud storage instead of returning base64.
+- Adjust `runpod-worker/handler.py` if you need to push stems to other cloud storage instead of R2.
 - Extend the `client` package with polling for async runs or integrations with DAWs.
 - Keep `AGENTS.md` in sync with any new workflows so future contributors know which directory to touch.
