@@ -77,25 +77,35 @@ def _find_stems_dir(out_root: pathlib.Path, model_name: str) -> pathlib.Path:
 def _normalize_r2_config(raw: Any) -> tuple[Optional[Dict[str, str]], Optional[str]]:
     if not isinstance(raw, dict):
         return None, None
+    if any(field in raw for field in (*R2_REQUIRED_FIELDS, "region")):
+        return None, "R2 endpoint, credentials, bucket and region must be configured on the worker"
     normalized: Dict[str, str] = {}
     missing = []
     for field in R2_REQUIRED_FIELDS:
-        value = raw.get(field)
-        if isinstance(value, str) and value.strip():
+        env_key = f"RUNPOD_R2_{'ENDPOINT' if field == 'endpoint_url' else field.upper()}"
+        value = os.environ.get(env_key)
+        if value and value.strip():
             normalized[field] = value
         else:
-            missing.append(field)
+            missing.append(env_key)
     if missing:
-        return None, f"Missing r2 fields: {', '.join(missing)}"
-    region = raw.get("region")
-    if isinstance(region, str) and region.strip():
-        normalized["region"] = region
-    input_key = raw.get("input_key")
-    if isinstance(input_key, str) and input_key.strip():
-        normalized["input_key"] = input_key
-    output_prefix = raw.get("output_prefix")
-    if isinstance(output_prefix, str) and output_prefix.strip():
-        normalized["output_prefix"] = output_prefix
+        return None, f"Missing worker R2 settings: {', '.join(missing)}"
+    normalized["region"] = os.environ.get("RUNPOD_R2_REGION") or "auto"
+    allowed_prefix = os.environ.get("RUNPOD_R2_PREFIX", "runpod-demucs").strip().strip("/")
+    if not allowed_prefix:
+        return None, "Worker RUNPOD_R2_PREFIX must not be empty"
+    for field in ("input_key", "output_prefix"):
+        value = raw.get(field)
+        if value is None:
+            continue
+        if (
+            not isinstance(value, str)
+            or not value.startswith(f"{allowed_prefix}/")
+            or not value[len(allowed_prefix) + 1 :].strip("/")
+            or any(part in (".", "..") for part in value.split("/"))
+        ):
+            return None, f"r2.{field} must be within the worker's permitted R2 prefix"
+        normalized[field] = value
     return normalized, None
 
 

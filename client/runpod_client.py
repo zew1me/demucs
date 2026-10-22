@@ -79,9 +79,13 @@ def _delete_r2_objects(client: Any, bucket: str, keys: Iterable[str]) -> None:
     objects = [{"Key": key} for key in keys if key]
     if not objects:
         return
+    errors = []
     for idx in range(0, len(objects), 1000):
         batch = objects[idx : idx + 1000]
-        client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
+        response = client.delete_objects(Bucket=bucket, Delete={"Objects": batch, "Quiet": True})
+        errors.extend(response.get("Errors", []))
+    if errors:
+        raise RuntimeError(f"R2 object deletion failed: {errors}")
 
 
 def _resolve_option(value: Optional[str], setting_key: str) -> Optional[str]:
@@ -140,8 +144,8 @@ def _resolve_r2_settings(
     ):
         return None, f"Missing required R2 settings: {', '.join(missing)}"
 
-    resolved_prefix = resolved_prefix or f"runpod-demucs/{uuid.uuid4().hex}"
-    resolved_prefix = resolved_prefix.strip("/")
+    base_prefix = (resolved_prefix or "runpod-demucs").strip().strip("/")
+    resolved_prefix = f"{base_prefix}/{uuid.uuid4().hex}" if base_prefix else uuid.uuid4().hex
 
     return (
         {
@@ -171,11 +175,11 @@ def main(
     r2_access_key_id: Optional[str] = typer.Option(None, help="Cloudflare R2 access key id"),
     r2_secret_access_key: Optional[str] = typer.Option(None, help="Cloudflare R2 secret access key"),
     r2_region: Optional[str] = typer.Option(None, help="Cloudflare R2 region (default: auto)"),
-    r2_prefix: Optional[str] = typer.Option(None, help="Cloudflare R2 key prefix"),
+    r2_prefix: Optional[str] = typer.Option(None, help="Cloudflare R2 base key prefix"),
     r2_download: bool = typer.Option(
         True, "--r2-download/--no-r2-download", help="Download stems from R2 when returned"
     ),
-    r2_cleanup: bool = typer.Option(False, help="Delete R2 objects after download"),
+    r2_cleanup: bool = typer.Option(False, help="Delete R2 input and downloaded stems"),
     timeout: int = typer.Option(900, help="HTTP timeout in seconds"),
     save_dir: pathlib.Path = typer.Option(pathlib.Path("runpod-stems"), help="Destination directory"),
 ) -> None:
@@ -234,11 +238,6 @@ def main(
             typer.secho(f"R2 upload failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1) from exc
         payload["r2"] = {
-            "endpoint_url": r2_settings["endpoint_url"],
-            "access_key_id": r2_settings["access_key_id"],
-            "secret_access_key": r2_settings["secret_access_key"],
-            "region": r2_settings.get("region") or "auto",
-            "bucket": r2_settings["bucket"],
             "input_key": input_key,
             "output_prefix": output_prefix,
         }
@@ -249,26 +248,34 @@ def main(
     headers = {"Authorization": f"Bearer {resolved_api_key}", "Content-Type": "application/json"}
 
     try:
-        response = requests.post(target_url, json={"input": payload}, headers=headers, timeout=timeout)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        typer.secho(f"RunPod request failed: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1) from exc
+        try:
+            response = requests.post(target_url, json={"input": payload}, headers=headers, timeout=timeout)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            typer.secho(f"RunPod request failed: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1) from exc
 
-    body = response.json()
-    output = body.get("output") or body
-    status = body.get("status") or output.get("status")
-    if status and status not in ("COMPLETED", "success", "SUCCESS"):
-        typer.secho(f"RunPod returned status {status}: {output}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
-    if output.get("status") == "error":
-        typer.secho(f"Worker error: {output.get('error')}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        body = response.json()
+        output = body.get("output") or body
+        status = body.get("status") or output.get("status")
+        if status and status not in ("COMPLETED", "success", "SUCCESS"):
+            typer.secho(f"RunPod returned status {status}: {output}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        if output.get("status") == "error":
+            typer.secho(f"Worker error: {output.get('error')}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
 
-    stems = output.get("stems")
-    if not stems:
-        typer.secho("No stems returned", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1)
+        stems = output.get("stems")
+        if not stems:
+            typer.secho("No stems returned", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+    except Exception:
+        if r2_cleanup and r2_client and r2_settings and input_key:
+            try:
+                _delete_r2_objects(r2_client, r2_settings["bucket"], [input_key])
+            except Exception as exc:  # preserve the original run failure
+                typer.secho(f"R2 input cleanup failed: {exc}", err=True, fg=typer.colors.RED)
+        raise
 
     destination = save_dir.expanduser().resolve()
     using_r2 = any(isinstance(value, dict) and value.get("r2_key") for value in stems.values())
@@ -289,13 +296,16 @@ def main(
             typer.secho("Stems stored in R2; skipping download (--no-r2-download).", fg=typer.colors.YELLOW)
         if r2_cleanup:
             keys = [input_key] if input_key else []
-            keys.extend(
-                value.get("r2_key")
-                for value in stems.values()
-                if isinstance(value, dict) and value.get("r2_key")
-            )
+            if r2_download:
+                keys.extend(
+                    value.get("r2_key")
+                    for value in stems.values()
+                    if isinstance(value, dict) and value.get("r2_key")
+                )
+            else:
+                typer.secho("Keeping stem objects in R2 because download is disabled.", fg=typer.colors.YELLOW)
             _delete_r2_objects(r2_client, r2_settings["bucket"], keys)
-            typer.secho("Deleted R2 objects for this run.", fg=typer.colors.GREEN)
+            typer.secho("Deleted R2 input and any downloaded stems for this run.", fg=typer.colors.GREEN)
     else:
         _write_stems(stems, destination)
         typer.secho(f"Decoded {len(stems)} stems to {destination}", fg=typer.colors.GREEN)

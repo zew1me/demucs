@@ -124,9 +124,21 @@ them explicitly.
 
 ### Cloudflare R2 transfer mode
 
-If you'd rather avoid base64 payloads, the CLI can upload inputs to Cloudflare R2, pass the R2
-credentials to the worker, and then download stems back locally. Provide the R2 credentials as
-flags or environment variables with the `RUNPOD_` prefix (for example `RUNPOD_R2_ENDPOINT`).
+The CLI can upload inputs to Cloudflare R2, send object keys to the worker, and then download
+stems back locally. Provide client R2 credentials as flags or environment variables with the
+`RUNPOD_` prefix (for example `RUNPOD_R2_ENDPOINT`). Credentials are never included in job payloads.
+
+Configure these secrets on the **worker** before using R2 mode:
+
+- `RUNPOD_R2_ENDPOINT`, `RUNPOD_R2_BUCKET`, `RUNPOD_R2_ACCESS_KEY_ID`, `RUNPOD_R2_SECRET_ACCESS_KEY`
+- Optional `RUNPOD_R2_REGION` (default: `auto`)
+- `RUNPOD_R2_PREFIX`: permitted base key prefix (default: `runpod-demucs`; must not be empty)
+
+The client and worker must use the same endpoint and bucket, with credentials permitting the
+required reads and writes. Set the client's `--r2-prefix` or `RUNPOD_R2_PREFIX` within the worker's
+permitted prefix. Each client run appends a fresh UUID to its base prefix. The worker rejects
+keys outside its permitted prefix and job-supplied endpoint, bucket, region, or credentials.
+Deploy the updated client and worker together; older credential-bearing jobs are rejected.
 
 ```bash
 RUNPOD_API_KEY=rp_sk_... RUNPOD_ENDPOINT_ID=8cw1xzsn9rmbti \
@@ -138,9 +150,10 @@ RUNPOD_R2_SECRET_ACCESS_KEY=... \
   --r2-download --r2-cleanup
 ```
 
-The worker responds with `r2_output` metadata (bucket + prefix). The client uses the same
-credentials to download the stems and can optionally delete the input/output keys when
-`--r2-cleanup` is set.
+The worker responds with `r2_output` metadata (bucket + prefix). The client uses its local
+credentials to download the stems. `--r2-cleanup` deletes the uploaded input on a failed request
+or worker response, and deletes the input plus downloaded stems after success. With
+`--no-r2-download --r2-cleanup`, only the input is deleted; stem objects remain in R2.
 
 ## Next steps
 
