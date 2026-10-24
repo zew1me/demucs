@@ -100,7 +100,7 @@ class R2FlowTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.directory = pathlib.Path(temporary.name)
+        self.directory = pathlib.Path(temporary.name).resolve()
         self.input_path = self.directory / "song.wav"
         self.input_path.write_bytes(b"audio fixture")
         self.r2 = Mock()
@@ -187,6 +187,52 @@ class R2FlowTests(unittest.TestCase):
         self.r2.download_file.assert_not_called()
         self.assertEqual(self.deleted_keys(), [self.r2.upload_file.call_args.args[2]])
         self.assertIn("Keeping stem objects in R2", result.output)
+
+    def test_unwrapped_worker_response_succeeds(self):
+        self.response.json.return_value = self.response.json.return_value["output"]
+        result = self.invoke("--r2-cleanup")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.r2.download_file.assert_called_once()
+        self.assertEqual(
+            self.deleted_keys(),
+            [self.r2.upload_file.call_args.args[2], self.stems["vocals"]["r2_key"]],
+        )
+
+    def test_malformed_response_cleanup_is_opt_in(self):
+        cases: list[tuple[ValueError | None, object, str]] = [
+            (ValueError("invalid JSON"), None, "Invalid RunPod JSON response")
+        ]
+        for value in [None, [], ["invalid"], "invalid", 1, False]:
+            cases.append((None, value, "Invalid RunPod response"))
+            cases.append(
+                (
+                    None,
+                    {"output": value, "stems": self.stems},
+                    "Invalid RunPod output",
+                )
+            )
+        for value in [None, {}, [], ["invalid"], "invalid", 1, False]:
+            cases.append((None, {"output": {"stems": value}}, "No stems returned"))
+        for json_error, body, message in cases:
+            for cleanup in [False, True]:
+                with self.subTest(json_error=json_error, body=body, cleanup=cleanup):
+                    self.r2.reset_mock()
+                    self.response.json.side_effect = json_error
+                    self.response.json.return_value = body
+                    result = self.invoke(*(["--r2-cleanup"] if cleanup else []))
+                    self.assertEqual(result.exit_code, 1, result.output)
+                    self.assertIsInstance(result.exception, SystemExit)
+                    self.assertIn(message, result.output)
+                    self.r2.upload_file.assert_called_once()
+                    self.r2.download_file.assert_not_called()
+                    self.assertFalse((self.directory / "stems").exists())
+                    if cleanup:
+                        self.r2.delete_objects.assert_called_once()
+                        self.assertEqual(
+                            self.deleted_keys(), [self.r2.upload_file.call_args.args[2]]
+                        )
+                    else:
+                        self.r2.delete_objects.assert_not_called()
 
     def test_failure_cleanup_is_opt_in(self):
         cases = [

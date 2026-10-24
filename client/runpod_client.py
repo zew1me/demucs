@@ -1,6 +1,7 @@
 import base64
 import pathlib
 import uuid
+from collections.abc import Mapping
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 import boto3
@@ -23,7 +24,7 @@ def _encode_file(path: pathlib.Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
 
-def _write_stems(stems: Dict[str, Any], destination: pathlib.Path) -> None:
+def _write_stems(stems: Mapping[str, Any], destination: pathlib.Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     for key, value in stems.items():
         if isinstance(value, dict):
@@ -59,7 +60,7 @@ def _build_r2_client(
 def _download_r2_stems(
     client: Any,
     bucket: str,
-    stems: Dict[str, Any],
+    stems: Mapping[str, Any],
     destination: pathlib.Path,
 ) -> None:
     destination.mkdir(parents=True, exist_ok=True)
@@ -255,8 +256,18 @@ def main(
             typer.secho(f"RunPod request failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1) from exc
 
-        body = response.json()
-        output = body.get("output") or body
+        try:
+            body = response.json()
+        except ValueError as exc:
+            typer.secho(f"Invalid RunPod JSON response: {exc}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1) from exc
+        if not isinstance(body, Mapping):
+            typer.secho("Invalid RunPod response: expected a mapping", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        output = body.get("output", body)
+        if not isinstance(output, Mapping):
+            typer.secho("Invalid RunPod output: expected a mapping", err=True, fg=typer.colors.RED)
+            raise typer.Exit(code=1)
         status = body.get("status") or output.get("status")
         if status and status not in ("COMPLETED", "success", "SUCCESS"):
             typer.secho(f"RunPod returned status {status}: {output}", err=True, fg=typer.colors.RED)
@@ -266,8 +277,8 @@ def main(
             raise typer.Exit(code=1)
 
         stems = output.get("stems")
-        if not stems:
-            typer.secho("No stems returned", err=True, fg=typer.colors.RED)
+        if not isinstance(stems, Mapping) or not stems:
+            typer.secho("No stems returned: expected a non-empty mapping", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
     except Exception:
         if r2_cleanup and r2_client and r2_settings and input_key:
