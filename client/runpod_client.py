@@ -62,21 +62,22 @@ def main(
 
     resolved_api_key = _resolve_option(api_key, "API_KEY")
     if not resolved_api_key:
-        raise typer.BadParameter("Set --api-key or configure RUNPOD_API_KEY", param_name="api_key")
+        raise typer.BadParameter("Set --api-key or configure RUNPOD_API_KEY", param_hint="--api-key")
 
     resolved_endpoint_url = _resolve_option(endpoint_url, "ENDPOINT_URL")
     resolved_endpoint_id = _resolve_option(endpoint_id, "ENDPOINT_ID")
     if not (resolved_endpoint_url or resolved_endpoint_id):
         raise typer.BadParameter(
-            "Provide --endpoint-url or configure --endpoint-id/RUNPOD_ENDPOINT_ID", param_name="endpoint_id"
+            "Provide --endpoint-url or configure --endpoint-id/RUNPOD_ENDPOINT_ID",
+            param_hint="--endpoint-url / --endpoint-id",
         )
 
     if not input_file:
-        raise typer.BadParameter("Provide --input-file", param_name="input_file")
+        raise typer.BadParameter("Provide --input-file", param_hint="--input-file")
 
     input_path = input_file.expanduser().resolve()
     if not input_path.exists():
-        raise typer.BadParameter(f"Input file not found: {input_path}", param_name="input_file")
+        raise typer.BadParameter(f"Input file not found: {input_path}", param_hint="--input-file")
 
     payload: Dict[str, Any] = {
         "model_name": model_name,

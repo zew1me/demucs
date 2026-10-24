@@ -3,10 +3,14 @@ import os
 import pathlib
 import subprocess
 import tempfile
-from typing import Dict, Any
+from typing import Any, Dict, cast
 
 import requests
-import runpod
+
+try:
+    import runpod  # type: ignore[import]
+except ModuleNotFoundError:  # pragma: no cover - runpod only exists in the worker image
+    runpod = cast(Any, None)
 
 INPUT_KEY_FILE = "audio_file.wav"
 DEFAULT_MODEL = "htdemucs_ft"
@@ -51,8 +55,10 @@ def _find_stems_dir(out_root: pathlib.Path, model_name: str) -> pathlib.Path:
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     inputs = event.get("input") or {}
 
-    audio_url = inputs.get("audio_url")
-    audio_b64 = inputs.get("audio_base64")
+    audio_url_raw = inputs.get("audio_url")
+    audio_url = audio_url_raw if isinstance(audio_url_raw, str) else None
+    audio_b64_raw = inputs.get("audio_base64")
+    audio_b64 = audio_b64_raw if isinstance(audio_b64_raw, str) else None
     model_name = inputs.get("model_name", DEFAULT_MODEL)
     shifts = int(inputs.get("shifts", DEFAULT_SHIFTS))
     overlap = float(inputs.get("overlap", DEFAULT_OVERLAP))
@@ -68,8 +74,10 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         try:
             if audio_url:
                 _download_audio(audio_url, audio_path)
-            else:
+            elif audio_b64:
                 _write_base64_audio(audio_b64, audio_path)
+            else:  # safeguard for typing
+                return {"status": "error", "error": "Provide 'audio_url' or 'audio_base64'"}
 
             env = os.environ.copy()
             env.setdefault("TORCHAUDIO_USE_SOUND_FILE", "1")
@@ -104,4 +112,5 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "error", "error": str(exc)}
 
 
-runpod.serverless.start({"handler": handler})
+if runpod:
+    runpod.serverless.start({"handler": handler})
