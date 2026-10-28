@@ -1,3 +1,4 @@
+import base64
 import pathlib
 import tempfile
 import unittest
@@ -198,6 +199,27 @@ class R2FlowTests(unittest.TestCase):
             [self.r2.upload_file.call_args.args[2], self.stems["vocals"]["r2_key"]],
         )
 
+    def test_base64_stems_are_written(self):
+        encoded = base64.b64encode(b"stem fixture").decode()
+        for wrapped in [False, True]:
+            with self.subTest(wrapped=wrapped):
+                output = {
+                    "status": "success",
+                    "stems": {
+                        "vocals": {"filename": "voice.wav", "base64": encoded},
+                        "drums": encoded + "\n",
+                    },
+                }
+                self.response.json.return_value = {"output": output} if wrapped else output
+                result = self.invoke()
+                self.assertEqual(result.exit_code, 0, result.output)
+                self.assertIn("Decoded 2 stems", result.output)
+                for filename in ["voice.wav", "drums.wav"]:
+                    self.assertEqual(
+                        (self.directory / "stems" / filename).read_bytes(), b"stem fixture"
+                    )
+                self.r2.download_file.assert_not_called()
+
     def test_malformed_response_cleanup_is_opt_in(self):
         cases: list[tuple[ValueError | None, object, str]] = [
             (ValueError("invalid JSON"), None, "Invalid RunPod JSON response")
@@ -213,6 +235,28 @@ class R2FlowTests(unittest.TestCase):
             )
         for value in [None, {}, [], ["invalid"], "invalid", 1, False]:
             cases.append((None, {"output": {"stems": value}}, "No stems returned"))
+        invalid_values = [None, "", " ", 0, 1, False, True, [], ["audio"], {}]
+        invalid_audio = [*invalid_values, "!!!", "invalid", "☃"]
+        invalid_stems = [*invalid_audio, {"filename": "vocals.wav"}]
+        invalid_stems.extend({"base64": value} for value in invalid_audio)
+        invalid_stems.extend({"r2_key": value} for value in invalid_values)
+        valid_stem_groups: list[dict[str, object]] = [{}, {"drums": "c3RlbQ=="}, dict(self.stems)]
+        for value in invalid_stems:
+            for valid_stems in valid_stem_groups:
+                cases.append(
+                    (
+                        None,
+                        {"output": {"stems": {**valid_stems, "bass": value}}},
+                        "Invalid RunPod stem",
+                    )
+                )
+        cases.append(
+            (
+                None,
+                {"output": {"stems": {**self.stems, "drums": "c3RlbQ=="}}},
+                "Invalid RunPod stem",
+            )
+        )
         for json_error, body, message in cases:
             for cleanup in [False, True]:
                 with self.subTest(json_error=json_error, body=body, cleanup=cleanup):
@@ -223,6 +267,8 @@ class R2FlowTests(unittest.TestCase):
                     self.assertEqual(result.exit_code, 1, result.output)
                     self.assertIsInstance(result.exception, SystemExit)
                     self.assertIn(message, result.output)
+                    self.assertNotIn("Decoded", result.output)
+                    self.assertNotIn("Downloaded", result.output)
                     self.r2.upload_file.assert_called_once()
                     self.r2.download_file.assert_not_called()
                     self.assertFalse((self.directory / "stems").exists())

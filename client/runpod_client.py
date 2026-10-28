@@ -280,6 +280,25 @@ def main(
         if not isinstance(stems, Mapping) or not stems:
             typer.secho("No stems returned: expected a non-empty mapping", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
+        using_r2 = any(isinstance(value, dict) and value.get("r2_key") for value in stems.values())
+        for stem_name, value in stems.items():
+            if using_r2:
+                key = value.get("r2_key") if isinstance(value, dict) else None
+                valid = isinstance(key, str) and bool(key.strip())
+            else:
+                blob = value.get("base64") if isinstance(value, dict) else value
+                try:
+                    valid = isinstance(blob, str) and bool(base64.b64decode(blob))
+                except ValueError:
+                    valid = False
+            if not valid:
+                expected = "a non-empty R2 key" if using_r2 else "non-empty base64 audio"
+                typer.secho(
+                    f"Invalid RunPod stem {stem_name!r}: expected {expected}",
+                    err=True,
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(code=1)
     except Exception:
         if r2_cleanup and r2_client and r2_settings and input_key:
             try:
@@ -289,7 +308,6 @@ def main(
         raise
 
     destination = save_dir.expanduser().resolve()
-    using_r2 = any(isinstance(value, dict) and value.get("r2_key") for value in stems.values())
     if using_r2:
         if not (r2_settings and r2_client):
             typer.secho("Worker returned R2 locations but no R2 settings were provided.", err=True)
