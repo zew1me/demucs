@@ -1,4 +1,4 @@
 demucs
-requests
+boto3
 runpod
 soundfile
