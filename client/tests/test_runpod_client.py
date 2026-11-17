@@ -236,7 +236,14 @@ class R2FlowTests(unittest.TestCase):
         for value in [None, {}, [], ["invalid"], "invalid", 1, False]:
             cases.append((None, {"output": {"stems": value}}, "No stems returned"))
         invalid_values = [None, "", " ", 0, 1, False, True, [], ["audio"], {}]
-        invalid_audio = [*invalid_values, "!!!", "invalid", "☃"]
+        invalid_audio = [
+            *invalid_values,
+            "!!!",
+            "invalid",
+            "☃",
+            "YQ==c3RlbQ==",
+            "YQ==\nc3RlbQ==",
+        ]
         invalid_stems = [*invalid_audio, {"filename": "vocals.wav"}]
         invalid_stems.extend({"base64": value} for value in invalid_audio)
         invalid_stems.extend({"r2_key": value} for value in invalid_values)
@@ -294,6 +301,8 @@ class R2FlowTests(unittest.TestCase):
                 },
             ),
             (None, None, {"status": "COMPLETED", "output": {"stems": {}}}),
+            (None, None, {"status": "CANCELLED", "output": {}}),
+            (None, None, {"status": "TIMED_OUT", "output": {}}),
         ]
         for request_error, http_error, body in cases:
             for cleanup in [False, True]:
@@ -317,6 +326,76 @@ class R2FlowTests(unittest.TestCase):
                         )
                     else:
                         self.r2.delete_objects.assert_not_called()
+
+    def test_in_flight_job_keeps_input_even_with_cleanup(self):
+        cases = [
+            (requests.Timeout("timed out"), None),
+            (None, {"status": "IN_QUEUE"}),
+            (None, {"status": "IN_PROGRESS", "output": {}}),
+            (None, {"status": "SOME_NEW_STATE"}),
+        ]
+        for request_error, body in cases:
+            with self.subTest(request_error=request_error, body=body):
+                self.r2.reset_mock()
+                self.post.side_effect = request_error
+                self.response.json.return_value = body
+                result = self.invoke("--r2-cleanup")
+                self.assertEqual(result.exit_code, 1, result.output)
+                self.r2.upload_file.assert_called_once()
+                self.r2.delete_objects.assert_not_called()
+                self.assertIn("Job may still be running", result.output)
+                self.assertIn(self.r2.upload_file.call_args.args[2], result.output)
+
+    def test_non_string_status_is_not_treated_as_running(self):
+        self.response.json.return_value = {"status": ["IN_PROGRESS"]}
+        result = self.invoke("--r2-cleanup")
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertEqual(self.deleted_keys(), [self.r2.upload_file.call_args.args[2]])
+
+    def test_download_failure_cleans_up_input_only_when_requested(self):
+        self.r2.download_file.side_effect = RuntimeError("download broke")
+        for cleanup in [False, True]:
+            with self.subTest(cleanup=cleanup):
+                self.r2.reset_mock()
+                result = self.invoke(*(["--r2-cleanup"] if cleanup else []))
+                self.assertEqual(result.exit_code, 1, result.output)
+                self.assertIsInstance(result.exception, RuntimeError)
+                if cleanup:
+                    self.assertEqual(
+                        self.deleted_keys(), [self.r2.upload_file.call_args.args[2]]
+                    )
+                else:
+                    self.r2.delete_objects.assert_not_called()
+
+    def test_base64_without_r2_flags_sends_audio_base64(self):
+        encoded = base64.b64encode(b"stem fixture").decode()
+        self.response.json.return_value = {
+            "status": "COMPLETED",
+            "output": {"status": "success", "stems": {"vocals": encoded}},
+        }
+        result = CliRunner().invoke(
+            client.app,
+            [
+                "--api-key",
+                "test-token",
+                "--endpoint-id",
+                "test-endpoint",
+                "--input-file",
+                str(self.input_path),
+                "--save-dir",
+                str(self.directory / "stems"),
+            ],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        payload = self.post.call_args.kwargs["json"]["input"]
+        self.assertEqual(
+            payload["audio_base64"], base64.b64encode(b"audio fixture").decode()
+        )
+        self.assertNotIn("r2", payload)
+        self.r2.upload_file.assert_not_called()
+        self.assertEqual(
+            (self.directory / "stems" / "vocals.wav").read_bytes(), b"stem fixture"
+        )
 
     def test_cleanup_failure_reports_error_and_preserves_run_failure(self):
         self.post.side_effect = requests.ConnectionError("offline")

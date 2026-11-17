@@ -14,6 +14,9 @@ DEFAULT_MODEL = "htdemucs_ft"
 DEFAULT_SHIFTS = 4
 DEFAULT_OVERLAP = 0.25
 DEFAULT_API_BASE = "https://api.runpod.ai/v2"
+# Statuses after which the worker is done with its R2 input. Any other status
+# (IN_QUEUE, IN_PROGRESS, ...) means the job may still need it.
+TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT", "success", "SUCCESS", "error"})
 
 settings = Dynaconf(envvar_prefix="RUNPOD", environments=True, load_dotenv=True)
 
@@ -22,6 +25,11 @@ app = typer.Typer(help="Invoke the RunPod Demucs endpoint and save returned stem
 
 def _encode_file(path: pathlib.Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("utf-8")
+
+
+def _decode_base64(blob: str) -> bytes:
+    """Decode the whole value, tolerating line breaks but rejecting data after padding."""
+    return base64.b64decode("".join(blob.split()), validate=True)
 
 
 def _write_stems(stems: Mapping[str, Any], destination: pathlib.Path) -> None:
@@ -36,7 +44,7 @@ def _write_stems(stems: Mapping[str, Any], destination: pathlib.Path) -> None:
         if not blob:
             continue
         output_path = destination / filename
-        output_path.write_bytes(base64.b64decode(blob))
+        output_path.write_bytes(_decode_base64(blob))
         typer.echo(f"wrote {output_path}")
 
 
@@ -87,6 +95,13 @@ def _delete_r2_objects(client: Any, bucket: str, keys: Iterable[str]) -> None:
         errors.extend(response.get("Errors", []))
     if errors:
         raise RuntimeError(f"R2 object deletion failed: {errors}")
+
+
+def _cleanup_input(client: Any, bucket: str, input_key: str) -> None:
+    try:
+        _delete_r2_objects(client, bucket, [input_key])
+    except Exception as exc:  # preserve the original run failure
+        typer.secho(f"R2 input cleanup failed: {exc}", err=True, fg=typer.colors.RED)
 
 
 def _resolve_option(value: Optional[str], setting_key: str) -> Optional[str]:
@@ -248,11 +263,13 @@ def main(
     target_url = resolved_endpoint_url or f"{api_base.rstrip('/')}/{resolved_endpoint_id}/runsync"
     headers = {"Authorization": f"Bearer {resolved_api_key}", "Content-Type": "application/json"}
 
+    job_may_be_running = False
     try:
         try:
             response = requests.post(target_url, json={"input": payload}, headers=headers, timeout=timeout)
             response.raise_for_status()
         except requests.RequestException as exc:
+            job_may_be_running = isinstance(exc, requests.Timeout)
             typer.secho(f"RunPod request failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1) from exc
 
@@ -269,6 +286,7 @@ def main(
             typer.secho("Invalid RunPod output: expected a mapping", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
         status = body.get("status") or output.get("status")
+        job_may_be_running = isinstance(status, str) and bool(status) and status not in TERMINAL_STATUSES
         if status and status not in ("COMPLETED", "success", "SUCCESS"):
             typer.secho(f"RunPod returned status {status}: {output}", err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1)
@@ -288,7 +306,7 @@ def main(
             else:
                 blob = value.get("base64") if isinstance(value, dict) else value
                 try:
-                    valid = isinstance(blob, str) and bool(base64.b64decode(blob))
+                    valid = isinstance(blob, str) and bool(_decode_base64(blob))
                 except ValueError:
                     valid = False
             if not valid:
@@ -301,10 +319,14 @@ def main(
                 raise typer.Exit(code=1)
     except Exception:
         if r2_cleanup and r2_client and r2_settings and input_key:
-            try:
-                _delete_r2_objects(r2_client, r2_settings["bucket"], [input_key])
-            except Exception as exc:  # preserve the original run failure
-                typer.secho(f"R2 input cleanup failed: {exc}", err=True, fg=typer.colors.RED)
+            if job_may_be_running:
+                typer.secho(
+                    f"Job may still be running; keeping R2 input s3://{r2_settings['bucket']}/{input_key}",
+                    err=True,
+                    fg=typer.colors.YELLOW,
+                )
+            else:
+                _cleanup_input(r2_client, r2_settings["bucket"], input_key)
         raise
 
     destination = save_dir.expanduser().resolve()
@@ -319,7 +341,12 @@ def main(
             if bucket and prefix:
                 typer.secho(f"R2 output: s3://{bucket}/{prefix}", fg=typer.colors.CYAN)
         if r2_download:
-            _download_r2_stems(r2_client, r2_settings["bucket"], stems, destination)
+            try:
+                _download_r2_stems(r2_client, r2_settings["bucket"], stems, destination)
+            except Exception:
+                if r2_cleanup and input_key:
+                    _cleanup_input(r2_client, r2_settings["bucket"], input_key)
+                raise
             typer.secho(f"Downloaded {len(stems)} stems to {destination}", fg=typer.colors.GREEN)
         else:
             typer.secho("Stems stored in R2; skipping download (--no-r2-download).", fg=typer.colors.YELLOW)
