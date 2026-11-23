@@ -20,10 +20,11 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: Install dependencies
-        run: uv sync --all-groups
+        # torch 2.4.1 does not ship wheels for the runner's default Python.
+        run: uv sync --locked --python 3.11 --all-groups
 
       - name: Run pre-commit
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+        run: uv run --locked pre-commit run --all-files --show-diff-on-failure
 
       - name: Test audio analysis
-        run: uv run python -m unittest discover -s client/tests
+        run: uv run --locked python -m unittest discover -s client/tests
