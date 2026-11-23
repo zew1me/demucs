@@ -40,6 +40,33 @@ TORCHAUDIO_USE_SOUND_FILE=1 uv run demucs --name htdemucs ~/Downloads/song.wav
 
 Outputs land in `local-run/separations/<timestamp>/...`. The subdirectory README covers the details.
 
+### Estimate tempo, key, and a downbeat
+
+```bash
+uv run demucs-analyze ~/Downloads/song.wav
+uv run demucs-analyze /path/to/separated/htdemucs/song
+```
+
+Pass the directory containing one song's WAV stems, not the parent model directory.
+The analyzer uses `drums.wav` for timing when present and sums the available pitched
+stems (`bass`, `other`, `vocals`, `guitar`, `piano`) for key. The stems must start
+at the same time and share a sample rate and length. A single audio file supported
+by SoundFile (e.g. WAV or FLAC) also works. No files are written.
+
+JSON goes to stdout: `tempo_bpm`, `key` (e.g. `F# minor`), `key_correlation`
+(profile similarity, not a probability), `beats_per_bar`, `beat_times_seconds`,
+and `estimated_downbeat_seconds`. Times are seconds from the start of the input,
+including any intro. Meter defaults to four beats per bar; pass `--beats-per-bar 3`
+for triple meter or `--bpm 99` to track beats at a known tempo.
+
+The downbeat is the first **tracked** beat in a repeatedly accented bar phase,
+not necessarily the song's first downbeat. It can be wrong for syncopated music
+and is `null` when the accents do not distinguish a phase. Key and tempo can
+also be unknown (`null`), and tempo can be estimated at half or double time.
+Audition the suggested beat against the DAW grid before warping or moving stems.
+
+Run the offline analysis tests with `uv run python -m unittest discover -s client/tests`.
+
 ## RunPod serverless worker (`runpod-worker/`)
 
 Key files:

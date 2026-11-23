@@ -12,9 +12,12 @@ dependencies = [
     "torchaudio==2.4.1",
     "typer>=0.12.3",
     "dynaconf>=3.2",
+    "librosa>=0.11,<0.12",
+    "numpy>=1.24",
 ]
 
 [project.scripts]
+demucs-analyze = "client.analyze:main"
 runpod-demucs = "client.runpod_client:app"
 
 [tool.uv]

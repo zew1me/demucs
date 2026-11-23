@@ -24,3 +24,6 @@ jobs:
 
       - name: Run pre-commit
         run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: Test audio analysis
+        run: uv run python -m unittest discover -s client/tests
